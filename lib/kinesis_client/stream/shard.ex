@@ -4,6 +4,13 @@ defmodule KinesisClient.Stream.Shard do
   alias KinesisClient.Stream.Shard.{Lease, Pipeline}
   import KinesisClient.Util
 
+  def child_spec(init_arg) do
+    %{
+      id: Keyword.get(arg, :name, __MODULE__),
+      start: {__MODULE__, :start_link, [init_arg]}
+    }
+  end
+
   def start_link(args) do
     Supervisor.start_link(__MODULE__, args, name: args[:shard_name])
   end

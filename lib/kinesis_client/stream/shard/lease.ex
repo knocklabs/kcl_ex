@@ -11,6 +11,13 @@ defmodule KinesisClient.Stream.Shard.Lease do
   # consider the lease expired.
   @default_lease_expiry 90_001
 
+  def child_spec(arg) do
+    %{
+      id: Keyword.get(arg, :name, __MODULE__),
+      start: {__MODULE__, :start_link, [arg]}
+    }
+  end
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: name(opts[:shard_id]))
   end
@@ -177,7 +184,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
     end
   end
 
-  defp take_lease(shard_lease, %{app_state_opts: opts, app_name: app_name} = state) do
+  defp take_lease(_shard_lease, %{app_state_opts: opts, app_name: app_name} = state) do
     expected = state.lease_count + 1
 
     Logger.debug(
@@ -197,7 +204,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
         :ok = Pipeline.start(app_name, state.shard_id)
         state
 
-      :lease_take_failed ->
+      {:error, :lease_take_failed} ->
         # TODO
         # :ok = Processor.ensure_halted(state)
         %{state | lease_holder: false, lease_count_increment_time: current_time()}
