@@ -6,7 +6,7 @@ defmodule KinesisClient.Stream.Shard do
 
   def child_spec(init_arg) do
     %{
-      id: Keyword.get(arg, :name, __MODULE__),
+      id: Keyword.get(init_arg, :name, __MODULE__),
       start: {__MODULE__, :start_link, [init_arg]}
     }
   end
