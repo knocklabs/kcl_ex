@@ -11,15 +11,10 @@ defmodule KinesisClient.Stream.Shard.Lease do
   # consider the lease expired.
   @default_lease_expiry 90_001
 
-  def child_spec(arg) do
-    %{
-      id: Keyword.get(arg, :name, __MODULE__),
-      start: {__MODULE__, :start_link, [arg]}
-    }
-  end
-
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: name(opts[:shard_id]))
+    name = name(opts[:app_name], opts[:shard_id])
+
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   defstruct [
@@ -224,7 +219,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
     System.monotonic_time(:millisecond)
   end
 
-  def name(shard_id) do
-    Module.concat(__MODULE__, shard_id)
+  def name(app_name, shard_id) do
+    Module.concat([__MODULE__, app_name, shard_id])
   end
 end
