@@ -164,7 +164,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
         notify({:lease_renewed, state}, state)
         state
 
-      :lease_renew_failed ->
+      {:error, :lease_renew_failed} ->
         Logger.debug(
           "Failed to renew lease, stopping producer: [app_name: #{app_name}, " <>
             "shard_id: #{state.shard_id}, lease_owner: #{state.lease_owner}]"
