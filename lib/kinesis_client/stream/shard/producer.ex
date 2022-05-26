@@ -246,9 +246,17 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
         poll_timer =
           case {records, new_demand} do
-            {[], _} -> schedule_shard_poll(state.poll_interval)
-            {_, 0} -> nil
-            _ -> schedule_shard_poll(0)
+            {[], _} ->
+              schedule_shard_poll(state.poll_interval)
+
+            {_, 0} ->
+              # Don't repoll if there's no demand
+              nil
+
+            _ ->
+              # Introduce jitter here for the immediate poll so that we execute somewhere
+              # between 0 and the poll interval time
+              Enum.random(0..state.poll_interval) |> schedule_shard_poll()
           end
 
         new_state = %{
