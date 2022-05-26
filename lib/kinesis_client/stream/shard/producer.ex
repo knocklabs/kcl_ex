@@ -233,32 +233,44 @@ defmodule KinesisClient.Stream.Shard.Producer do
   end
 
   defp get_records(%__MODULE__{demand: demand, kinesis_opts: kinesis_opts} = state) do
-    {:ok,
-     %{
-       "NextShardIterator" => next_iterator,
-       "MillisBehindLatest" => _millis_behind_latest,
-       "Records" => records
-     }} = Kinesis.get_records(state.shard_iterator, Keyword.merge(kinesis_opts, limit: demand))
+    case Kinesis.get_records(state.shard_iterator, Keyword.merge(kinesis_opts, limit: demand)) do
+      {:ok,
+       %{
+         "NextShardIterator" => next_iterator,
+         "MillisBehindLatest" => _millis_behind_latest,
+         "Records" => records
+       }} ->
+        new_demand = demand - length(records)
 
-    new_demand = demand - length(records)
+        messages = wrap_records(records)
 
-    messages = wrap_records(records)
+        poll_timer =
+          case {records, new_demand} do
+            {[], _} -> schedule_shard_poll(state.poll_interval)
+            {_, 0} -> nil
+            _ -> schedule_shard_poll(0)
+          end
 
-    poll_timer =
-      case {records, new_demand} do
-        {[], _} -> schedule_shard_poll(state.poll_interval)
-        {_, 0} -> nil
-        _ -> schedule_shard_poll(0)
-      end
+        new_state = %{
+          state
+          | demand: new_demand,
+            poll_timer: poll_timer,
+            shard_iterator: next_iterator
+        }
 
-    new_state = %{
-      state
-      | demand: new_demand,
-        poll_timer: poll_timer,
-        shard_iterator: next_iterator
-    }
+        {:noreply, messages, new_state}
 
-    {:noreply, messages, new_state}
+      {:error, reason} ->
+        Logger.info(
+          "Received error when getting records for #{state.app_name}-#{state.shard_id}: #{inspect(reason)}"
+        )
+
+        # Retry the get records call again to see if the issue clears up
+        poll_timer = schedule_shard_poll(state.poll_interval)
+        new_state = %{state | poll_timer: poll_timer}
+
+        {:noreply, [], new_state}
+    end
   end
 
   defp get_shard_iterator(%{shard_iterator_type: :after_sequence_number} = state) do
