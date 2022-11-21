@@ -114,14 +114,18 @@ defmodule KinesisClient.Stream.Shard.Producer do
   end
 
   @impl GenStage
-  def handle_info({:ack, _ref, successful_msgs, []}, state) do
-    %{metadata: %{"SequenceNumber" => checkpoint}} = successful_msgs |> Enum.reverse() |> hd()
+  def handle_info({:ack, _ref, successful_msgs, failed_msgs}, state) do
+    checkpoint = get_top_checkpoint(successful_msgs, failed_msgs)
 
     :ok = update_checkpoint(state, checkpoint)
-    notify({:acked, %{checkpoint: checkpoint, success: successful_msgs, failed: []}}, state)
+
+    notify(
+      {:acked, %{checkpoint: checkpoint, success: successful_msgs, failed: failed_msgs}},
+      state
+    )
 
     Logger.debug(
-      "Acknowledged #{length(successful_msgs)} messages: [app_name: #{state.app_name} " <>
+      "Acknowledged #{length(successful_msgs) + length(failed_msgs)} messages: [app_name: #{state.app_name} " <>
         "shard_id: #{state.shard_id}"
     )
 
@@ -131,49 +135,29 @@ defmodule KinesisClient.Stream.Shard.Producer do
   end
 
   @impl GenStage
-  def handle_info({:ack, _ref, [], failed_msgs}, state) do
-    Logger.debug("Retrying #{length(failed_msgs)} failed messages")
-
-    state =
-      case state.shard_closed_timer do
-        nil ->
-          state
-
-        timer ->
-          Process.cancel_timer(timer)
-          %{state | shard_closed_timer: nil}
-      end
-
-    {:noreply, failed_msgs, state}
-  end
-
-  @impl GenStage
-  def handle_info({:ack, _ref, successful_msgs, failed_msgs}, state) do
-    %{metadata: %{"SequenceNumber" => checkpoint}} = successful_msgs |> Enum.reverse() |> hd()
-
-    :ok = update_checkpoint(state, checkpoint)
-
-    Logger.debug(
-      "Acknowledged #{length(successful_msgs)} messages, Retrying #{length(failed_msgs)} failed messages"
-    )
-
-    state =
-      case state.shard_closed_timer do
-        nil ->
-          state
-
-        timer ->
-          Process.cancel_timer(timer)
-          %{state | shard_closed_timer: nil}
-      end
-
-    {:noreply, failed_msgs, state}
-  end
-
-  @impl GenStage
   def handle_info(msg, state) do
     Logger.debug("ShardConsumer.Producer got an unhandled message #{inspect(msg)}")
     {:noreply, [], state}
+  end
+
+  def get_top_checkpoint(successful_msgs, failed_msgs) do
+    success_checkpoint = get_top_checkpoint(successful_msgs)
+    failed_checkpoint = get_top_checkpoint(failed_msgs)
+    checkpoint = Enum.sort([success_checkpoint, failed_checkpoint], :desc) |> hd()
+
+    if checkpoint == "-1" do
+      raise "Error getting highest checkpoint from acknowledged messages: #{inspect(successful_msgs)} #{inspect(failed_msgs)}"
+    end
+
+    checkpoint
+  end
+
+  def get_top_checkpoint([]), do: "0"
+
+  def get_top_checkpoint(msgs) do
+    %{metadata: %{"SequenceNumber" => checkpoint}} = msgs |> Enum.reverse() |> hd()
+
+    checkpoint
   end
 
   @impl GenStage
@@ -214,14 +198,22 @@ defmodule KinesisClient.Stream.Shard.Producer do
     meta = telemetry_meta(state)
 
     :telemetry.span([:kinesis_client, :shard_producer, :update_checkpoint], meta, fn ->
-      :ok =
-        AppState.update_checkpoint(
-          state.app_name,
-          state.shard_id,
-          state.lease_owner,
-          checkpoint,
-          state.app_state_opts
-        )
+      case AppState.update_checkpoint(
+             state.app_name,
+             state.shard_id,
+             state.lease_owner,
+             checkpoint,
+             state.app_state_opts
+           ) do
+        :ok ->
+          :ok
+
+        {:error, :lease_owner_match} ->
+          raise "Checkpoint failed for #{state.app_name}-#{state.shard_id}: this consumer is not the lease owner"
+
+        unknown ->
+          raise "Checkpoint failed for #{state.app_name}-#{state.shard_id}: #{inspect(unknown)}"
+      end
 
       {:ok, meta}
     end)
