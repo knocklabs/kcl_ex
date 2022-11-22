@@ -113,11 +113,28 @@ defmodule KinesisClient.Stream.Shard.Producer do
     {:noreply, %{state | shard_closed_timer: timer}}
   end
 
+  # TODO(KNO-2531) Switch to a custom Broadway.Acknowledger instead of relying
+  # on Broadway.CallerAcknowledger so that we can more efficiently checkpoint
+  # our progress in dynamo.
   @impl GenStage
   def handle_info({:ack, _ref, successful_msgs, failed_msgs}, state) do
     checkpoint = get_top_checkpoint(successful_msgs, failed_msgs)
 
-    :ok = update_checkpoint(state, checkpoint)
+    # -1 means there wasn't a reliable checkpoint figure present, so
+    # we should not update the checkpoint at all.
+    # This should never happen with conforming messages.
+    if checkpoint != "-1" do
+      :ok = update_checkpoint(state, checkpoint)
+    else
+      Logger.warn("""
+        Unable to update checkpoint for app_name: #{state.app_name}, shard_id: #{state.shard_id}
+
+        This might happen for a few reasons (in order of likelihood):
+        1. You are writing tests, and your messages need something like %{metadata: %{"SequenceNumber" => "SomeStringHere"}}
+        2. Kinesis changed how it publishes messages
+        3. We tried to ack an empty batch (Not possible. Then again, we also don't _really_ know why the sky is blue, so go check your confidence.)
+      """)
+    end
 
     notify(
       {:acked, %{checkpoint: checkpoint, success: successful_msgs, failed: failed_msgs}},
@@ -141,24 +158,22 @@ defmodule KinesisClient.Stream.Shard.Producer do
   end
 
   def get_top_checkpoint(successful_msgs, failed_msgs) do
-    success_checkpoint = get_top_checkpoint(successful_msgs)
-    failed_checkpoint = get_top_checkpoint(failed_msgs)
-    checkpoint = Enum.sort([success_checkpoint, failed_checkpoint], :desc) |> hd()
-
-    if checkpoint == "-1" do
-      raise "Error getting highest checkpoint from acknowledged messages: #{inspect(successful_msgs)} #{inspect(failed_msgs)}"
-    end
-
-    checkpoint
+    # "-1" used as our default value. Indicates to caller that no checkpoint should be made.
+    ["-1" | successful_msgs]
+    |> unwrap_sequence_numbers()
+    # Batch sizes may be large, using list cons | is faster than ++
+    # https://github.com/devonestes/fast-elixir#combining-lists-with--vs--code
+    |> Enum.reduce(unwrap_sequence_numbers(failed_msgs), &[&1 | &2])
+    |> Enum.max()
   end
 
-  def get_top_checkpoint([]), do: "0"
-
-  def get_top_checkpoint(msgs) do
-    %{metadata: %{"SequenceNumber" => checkpoint}} = msgs |> Enum.reverse() |> hd()
-
-    checkpoint
-  end
+  defp unwrap_sequence_numbers(messages),
+    do:
+      Enum.map(messages, fn
+        %{metadata: %{"SequenceNumber" => checkpoint}} -> checkpoint
+        # Poorly formatted messages just turn into -1
+        _ -> "-1"
+      end)
 
   @impl GenStage
   def handle_call(:start, from, state) do
