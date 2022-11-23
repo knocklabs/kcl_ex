@@ -167,13 +167,13 @@ defmodule KinesisClient.Stream.Shard.Producer do
     |> Enum.max()
   end
 
-  defp unwrap_sequence_numbers(messages),
-    do:
-      Enum.map(messages, fn
-        %{metadata: %{"SequenceNumber" => checkpoint}} -> checkpoint
-        # Poorly formatted messages just turn into -1
-        _ -> "-1"
-      end)
+  defp unwrap_sequence_numbers(messages) do
+    Enum.map(messages, fn
+      %{metadata: %{"SequenceNumber" => checkpoint}} -> checkpoint
+      # Poorly formatted messages just turn into -1
+      _ -> "-1"
+    end)
+  end
 
   @impl GenStage
   def handle_call(:start, from, state) do
@@ -197,7 +197,8 @@ defmodule KinesisClient.Stream.Shard.Producer do
           })
 
         :not_found ->
-          raise "No lease has been created for #{state.app_name}-#{state.shard_id}"
+          raise KinesisClient.Error,
+            message: "No lease has been created for #{state.app_name}-#{state.shard_id}"
       end
 
     GenStage.reply(from, :ok)
@@ -224,10 +225,14 @@ defmodule KinesisClient.Stream.Shard.Producer do
           :ok
 
         {:error, :lease_owner_match} ->
-          raise "Checkpoint failed for #{state.app_name}-#{state.shard_id}: this consumer is not the lease owner"
+          raise KinesisClient.Error,
+            message:
+              "Checkpoint failed for #{state.app_name}-#{state.shard_id}: this consumer is not the lease owner"
 
         unknown ->
-          raise "Checkpoint failed for #{state.app_name}-#{state.shard_id}: #{inspect(unknown)}"
+          raise KinesisClient.Error,
+            message:
+              "Checkpoint failed for #{state.app_name}-#{state.shard_id}: #{inspect(unknown)}"
       end
 
       {:ok, meta}
