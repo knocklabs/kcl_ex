@@ -149,10 +149,10 @@ defmodule KinesisClient.Stream.AppState.Dynamo do
       return_values: "UPDATED_NEW"
     ]
 
-    case Dynamo.update_item(app_name, %{"shard_id" => shard_id}, update_opt) |> ExAws.request() do
+    case Dynamo.update_item(app_name, %{"shard_id" => shard_id}, update_opt)
+         |> ExAws.request() do
       {:ok, %{"Attributes" => %{"completed" => %{"BOOL" => true}}}} -> :ok
       {:error, {"ConditionalCheckFailedException", _}} -> {:error, :lease_owner_match}
-      reply -> reply
     end
   end
 

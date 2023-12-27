@@ -10,6 +10,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
   @behaviour Broadway.Producer
 
   defstruct [
+    :coordinator_name,
     :kinesis_opts,
     :consumer_name,
     :stream_name,
@@ -26,6 +27,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
     :app_state_opts,
     :lease_owner,
     :shard_closed_timer,
+    :child_shards,
     shutdown_delay: 300_000,
     demand: 0
   ]
@@ -45,6 +47,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
   @impl GenStage
   def init(opts) do
     state = %__MODULE__{
+      coordinator_name: opts[:coordinator_name],
       shard_id: opts[:shard_id],
       app_name: opts[:app_name],
       lease_owner: opts[:lease_owner],
@@ -102,7 +105,10 @@ defmodule KinesisClient.Stream.Shard.Producer do
     get_records(%{state | poll_timer: nil})
   end
 
-  def handle_info(:shard_closed, %{coordinator_name: coordinator, shard_id: shard_id} = state) do
+  def handle_info(
+        :shard_closed,
+        %{coordinator_name: coordinator, shard_id: shard_id, child_shards: child_shards} = state
+      ) do
     # just in case something goes awry, try and close the Shard in the future
     Logger.info(
       "Shard is closed, notifying Coordinator: [app_name: #{state.app_name}, " <>
@@ -110,9 +116,11 @@ defmodule KinesisClient.Stream.Shard.Producer do
     )
 
     timer = Process.send_after(self(), :shard_closed, state.shutdown_delay)
-    AppState.close_shard(state.app_name, state.shard_id, state.app_state_opts)
     :ok = Coordinator.close_shard(coordinator, shard_id)
-    {:noreply, %{state | shard_closed_timer: timer}}
+
+    :ok = GenServer.cast(coordinator, {:append_shards, child_shards})
+
+    {:stop, :normal, %{state | shard_closed_timer: timer}}
   end
 
   # TODO(KNO-2531) Switch to a custom Broadway.Acknowledger instead of relying
@@ -148,14 +156,17 @@ defmodule KinesisClient.Stream.Shard.Producer do
         "shard_id: #{state.shard_id}"
     )
 
-    state = handle_closed_shard(state)
-
-    {:noreply, [], state}
+    if state.status == :closed do
+      state = handle_closed_shard(state)
+      {:noreply, [], state}
+    else
+      {:noreply, [], state}
+    end
   end
 
   @impl GenStage
   def handle_info(msg, state) do
-    Logger.debug("ShardConsumer.Producer got an unhandled message #{inspect(msg)}")
+    Logger.debug("#{__MODULE__} got an unhandled message #{inspect(msg)}")
     {:noreply, [], state}
   end
 
@@ -204,7 +215,13 @@ defmodule KinesisClient.Stream.Shard.Producer do
       end
 
     GenStage.reply(from, :ok)
-    {:noreply, records, new_state}
+
+    if new_state.status == :closed do
+      new_state = handle_closed_shard(new_state)
+      {:noreply, records, new_state}
+    else
+      {:noreply, records, new_state}
+    end
   end
 
   @impl GenStage
@@ -243,8 +260,14 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
   defp get_records(%__MODULE__{shard_iterator: nil} = state) do
     case get_shard_iterator(state) do
+      # If a shard is not found, we treat it as closed
+      # as shards that are truncated are no longer
+      # available and thus show up as not found.
+      {:error, {"ResourceNotFoundException", _}} ->
+        {:noreply, [], %{state | status: :closed}}
+
       {:ok, %{"ShardIterator" => nil}} ->
-        {:noreply, [], %{status: :closed}}
+        {:noreply, [], %{state | status: :closed}}
 
       {:ok, %{"ShardIterator" => iterator}} ->
         get_records(%{state | shard_iterator: iterator})
@@ -275,6 +298,10 @@ defmodule KinesisClient.Stream.Shard.Producer do
          "MillisBehindLatest" => millis_behind_latest,
          "Records" => records
        }} ->
+        Logger.debug(
+          "Received #{length(records)} records (#{millis_behind_latest} ms behind latest) for #{state.app_name}-#{state.shard_id}"
+        )
+
         new_demand = demand - length(records)
 
         messages = wrap_records(records)
@@ -308,6 +335,15 @@ defmodule KinesisClient.Stream.Shard.Producer do
         }
 
         {:ok, messages, new_state}
+
+      {:ok, %{"ChildShards" => child_shards, "MillisBehindLatest" => _, "Records" => []}} ->
+        Logger.debug(
+          "Shard #{state.shard_id} has child shards: #{inspect(child_shards)} - the current shard will now close"
+        )
+
+        state = handle_closed_shard(%{state | status: :closed, child_shards: child_shards})
+
+        {:ok, [], state}
 
       {:error, reason} ->
         Logger.info(
@@ -375,10 +411,6 @@ defmodule KinesisClient.Stream.Shard.Producer do
     timer = Process.send_after(self(), :shard_closed, delay)
 
     %{s | shard_closed_timer: timer}
-  end
-
-  defp handle_closed_shard(state) do
-    state
   end
 
   defp schedule_shard_poll(interval) do

@@ -63,7 +63,7 @@ defmodule KinesisClient.Stream.Coordinator do
       retry_timeout: Keyword.get(opts, :retry_timeout, 30_000)
     }
 
-    Logger.debug("Starting KinesisClient.Stream.Coordinates: #{inspect(state)}")
+    Logger.debug("Starting KinesisClient.Stream.Coordinator: #{inspect(state)}")
     {:ok, state, {:continue, :initialize}}
   end
 
@@ -89,8 +89,25 @@ defmodule KinesisClient.Stream.Coordinator do
       ) do
     {ref, _} = Enum.find(shards, fn {_monitor_ref, in_shard_id} -> in_shard_id == shard_id end)
 
-    Process.demonitor(ref, :flush)
+    :ok =
+      AppState.close_shard(
+        state.app_name,
+        shard_id,
+        state.shard_args[:lease_owner],
+        state.app_state_opts
+      )
+
     Shard.stop(Shard.name(app_name, sn, shard_id))
+    Process.demonitor(ref, [:flush])
+
+    {:noreply, state}
+  end
+
+  def handle_cast({:append_shards, child_shards}, state) do
+    ## TODO Figure out how to append shards to the graph
+
+    ## In the mean time, restarting the consumer will cause the new shards to be picked up
+    ## and processed.
 
     {:noreply, state}
   end
