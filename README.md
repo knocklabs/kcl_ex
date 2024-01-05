@@ -107,6 +107,8 @@ SERVICES=kinesis,dynamodb localstack start --host
 ## TODO
 
 - [x] Test shard merges and splits more thoroughly
+- [ ] Adaptively respond to rate limits from Kinesis and GenStage demand so that we don't get throttled
+- [ ] Support [enhanced fanout](https://docs.aws.amazon.com/streams/latest/dev/enhanced-consumers.html) for higher throughput
 - [ ] Support more than just Dynamo for tracking state (e.g. Redis or Postgres)
 - [ ] Consider integrating with Phoenix PubSub so that shard splits and merges can be broadcast to other nodes in the cluster, which can then start/stop the relevant Broadway pipelines.
 - [ ] Consider starting just one Broadway pipeline, and having shards feed into the same pipeline. This would make it operate more like other broadway adapters, since kcl_ex wraps broadway with its own supervision tree.
