@@ -116,6 +116,8 @@ defmodule KinesisClient.Stream.CoordinatorTest do
     {:ok, _} = start_coordinator(opts)
 
     assert_receive {:shards, shards}, 5_000
+    assert Enum.empty?(shards) == false
+
     assert_receive {:shard_started, %{pid: pid, shard_id: "shardId-000000000000"}}, 5_000
     assert Process.alive?(pid) == true
     assert_receive {:shard_started, %{pid: pid, shard_id: "shardId-000000000001"}}, 5_000
@@ -123,8 +125,6 @@ defmodule KinesisClient.Stream.CoordinatorTest do
 
     refute_receive {:shard_started, %{pid: _, shard_id: "shardId-000000000002"}}, 5_000
     refute_receive {:shard_started, %{pid: _, shard_id: "shardId-000000000003"}}, 5_000
-
-    assert Enum.empty?(shards) == false
   end
 
   @tag capture_log: true

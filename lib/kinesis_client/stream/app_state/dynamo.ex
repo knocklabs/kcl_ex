@@ -1,5 +1,9 @@
 defmodule KinesisClient.Stream.AppState.Dynamo do
-  @moduledoc false
+  @moduledoc """
+  Adapter for using DynamoDB as the application state store (the default).
+
+  See KinesisClient.Stream.AppState for more information.
+  """
 
   alias ExAws.Dynamo
   alias KinesisClient.Stream.AppState.Adapter, as: AppStateAdapter

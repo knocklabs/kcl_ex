@@ -12,7 +12,7 @@ defmodule KinesisClient.Stream do
 
   ## Options
     * `:stream_name` - Required. The Kinesis Data Stream to process.
-    * `:app_name` - Required.This should be a unique name across all your applications and the DynamodDB
+    * `:app_name` - Required. This should be a unique name across all your applications and the DynamodDB
       tablespace in your AWS region
     * `:name` - The process name. Defaults to `KinesisClient.Stream`.
     * `:max_demand` - The maximum number of records to retrieve from Kinesis. Defaults to 100.

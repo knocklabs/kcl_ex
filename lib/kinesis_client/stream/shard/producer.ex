@@ -1,6 +1,12 @@
 defmodule KinesisClient.Stream.Shard.Producer do
   @moduledoc """
   Producer GenStage used in `KinesisClient.Stream.ShardConsumer` Broadway pipeline.
+
+  Messages for the Kinesis shard are retrieved here and sent to the consumer. Once
+  the Producer consumes the last records of a given Stream, AWS returns the child
+  shards that continue the Stream for this shard. The Producer then notifies the
+  Coordinator of the child shards so that they can be added to the Stream, and
+  then the Producer signals for the shard to be stopped.
   """
   use GenStage
   require Logger

@@ -3,6 +3,9 @@ defmodule KinesisClient.Stream.Coordinator do
   This module will describe a given stream and enumerate all the shards. It will then handle
   starting and stopping `KinesisClient.Stream.Shard` processes as necessary to ensure the
   stream is processed completely and in the correct order.
+
+  As shards complete, they inform the Coordinator of any child shards that may need to be
+  started.
   """
   use GenServer
   require Logger
@@ -197,8 +200,8 @@ defmodule KinesisClient.Stream.Coordinator do
   end
 
   defp maybe_start_shard(parents, shard_id, state, shard_pid_map) do
-    if parents_completed?(parents, shard_id, state) do
-      Logger.info("Parent shards are complete so starting #{shard_id}")
+    if parents_completed?(parents, shard_id, state) and not shard_completed?(shard_id, state) do
+      Logger.info("Parent shards are complete and child is not, so starting #{shard_id}")
 
       {:ok, shard_pid} = start_shard(shard_id, state)
       Map.put(shard_pid_map, shard_id, shard_pid)
@@ -220,11 +223,21 @@ defmodule KinesisClient.Stream.Coordinator do
     end)
   end
 
+  defp shard_completed?(shard_id, state) do
+    case get_lease(shard_id, state) do
+      %{completed: true} ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
   defp get_lease(shard_id, %{app_name: app_name, app_state_opts: app_state_opts}) do
     AppState.get_lease(app_name, shard_id, app_state_opts)
   end
 
-  # Start a shard and return an updated worker map with the %{lease_ref => pid}
+  # Start a shard and return an updated worker map with the %{shard_id => pid}
   @spec start_shard(
           shard_id :: String.t(),
           state :: map

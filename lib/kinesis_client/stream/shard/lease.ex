@@ -1,5 +1,13 @@
 defmodule KinesisClient.Stream.Shard.Lease do
-  @moduledoc false
+  @moduledoc """
+  This module is responsible for managing the lease for a given shard. It will attempt to take
+  the lease if it is not currently owned by another node, or renew the lease if it is owned by
+  this node.
+
+  If the lease is not renewed within a certain amount of time, it will be considered expired and
+  can be taken by another node.
+  """
+
   require Logger
   use GenServer
   alias KinesisClient.Stream.AppState
