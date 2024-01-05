@@ -1,8 +1,9 @@
 defmodule KinesisClient.Stream.CoordinatorTest do
   use KinesisClient.Case, async: false
 
-  alias KinesisClient.Stream.Coordinator
   alias KinesisClient.Stream.AppState.ShardLease
+  alias KinesisClient.Stream.Coordinator
+
   @stream_name "decline-roman-empire-test"
   @shard_count 6
   @supervisor_name MyShardSupervisor

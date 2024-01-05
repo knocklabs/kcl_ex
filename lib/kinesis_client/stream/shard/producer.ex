@@ -7,6 +7,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
   alias KinesisClient.Kinesis
   alias KinesisClient.Stream.AppState
   alias KinesisClient.Stream.Coordinator
+  alias KinesisClient.Stream.Shard
   @behaviour Broadway.Producer
 
   defstruct [
@@ -26,9 +27,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
     :app_name,
     :app_state_opts,
     :lease_owner,
-    :shard_closed_timer,
     :child_shards,
-    shutdown_delay: 300_000,
     demand: 0
   ]
 
@@ -109,18 +108,25 @@ defmodule KinesisClient.Stream.Shard.Producer do
         :shard_closed,
         %{coordinator_name: coordinator, shard_id: shard_id, child_shards: child_shards} = state
       ) do
-    # just in case something goes awry, try and close the Shard in the future
     Logger.info(
       "Shard is closed, notifying Coordinator: [app_name: #{state.app_name}, " <>
         "shard_id: #{state.shard_id}]"
     )
 
-    timer = Process.send_after(self(), :shard_closed, state.shutdown_delay)
-    :ok = Coordinator.close_shard(coordinator, shard_id)
+    :ok =
+      AppState.close_shard(
+        state.app_name,
+        shard_id,
+        state.lease_owner,
+        state.app_state_opts
+      )
 
-    :ok = GenServer.cast(coordinator, {:append_shards, child_shards})
+    :ok = Coordinator.append_shards(coordinator, child_shards)
 
-    {:stop, :normal, %{state | shard_closed_timer: timer}}
+    Shard.name(state.app_name, state.stream_name, shard_id)
+    |> Shard.stop()
+
+    {:noreply, [], %{state | status: :closed}}
   end
 
   # TODO(KNO-2531) Switch to a custom Broadway.Acknowledger instead of relying
@@ -341,7 +347,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
           "Shard #{state.shard_id} has child shards: #{inspect(child_shards)} - the current shard will now close"
         )
 
-        state = handle_closed_shard(%{state | status: :closed, child_shards: child_shards})
+        state = handle_closed_shard(%{state | child_shards: child_shards})
 
         {:ok, [], state}
 
@@ -397,20 +403,12 @@ defmodule KinesisClient.Stream.Shard.Producer do
     end)
   end
 
-  defp handle_closed_shard(%{status: :closed, shard_closed_timer: nil, shutdown_delay: delay} = s) do
-    timer = Process.send_after(self(), :shard_closed, delay)
+  defp handle_closed_shard(%{status: :closed} = state), do: state
 
-    %{s | shard_closed_timer: timer}
-  end
+  defp handle_closed_shard(state) do
+    Process.send_after(self(), :shard_closed, 0)
 
-  defp handle_closed_shard(
-         %{status: :closed, shard_closed_timer: old_timer, shutdown_delay: delay} = s
-       ) do
-    Process.cancel_timer(old_timer)
-
-    timer = Process.send_after(self(), :shard_closed, delay)
-
-    %{s | shard_closed_timer: timer}
+    %{state | status: :closed}
   end
 
   defp schedule_shard_poll(interval) do

@@ -1,8 +1,10 @@
 defmodule KinesisClient.Stream.AppState.Dynamo do
   @moduledoc false
+
+  alias ExAws.Dynamo
   alias KinesisClient.Stream.AppState.Adapter, as: AppStateAdapter
   alias KinesisClient.Stream.AppState.ShardLease
-  alias ExAws.Dynamo
+
   require Logger
 
   @behaviour AppStateAdapter

@@ -6,9 +6,10 @@ defmodule KinesisClient.Stream.Coordinator do
   """
   use GenServer
   require Logger
+
   alias KinesisClient.Kinesis
-  alias KinesisClient.Stream.Shard
   alias KinesisClient.Stream.AppState
+  alias KinesisClient.Stream.Shard
 
   defstruct [
     :name,
@@ -24,7 +25,7 @@ defmodule KinesisClient.Stream.Coordinator do
     # unique reference used to identify this instance KinesisClient.Stream
     :worker_ref,
     :shard_args,
-    shard_ref_map: %{},
+    shard_pid_map: %{},
     startup_attempt: 1
   ]
 
@@ -44,8 +45,8 @@ defmodule KinesisClient.Stream.Coordinator do
     GenServer.start_link(__MODULE__, args, name: args[:name])
   end
 
-  def close_shard(coordinator, shard_id) do
-    GenServer.cast(coordinator, {:close_shard, shard_id})
+  def append_shards(coordinator, child_shards) do
+    GenServer.call(coordinator, {:append_shards, child_shards})
   end
 
   @impl GenServer
@@ -82,34 +83,22 @@ defmodule KinesisClient.Stream.Coordinator do
     {:reply, graph, s}
   end
 
-  @impl GenServer
-  def handle_cast(
-        {:close_shard, shard_id},
-        %{shard_ref_map: shards, stream_name: sn, app_name: app_name} = state
-      ) do
-    {ref, _} = Enum.find(shards, fn {_monitor_ref, in_shard_id} -> in_shard_id == shard_id end)
-
-    :ok =
-      AppState.close_shard(
-        state.app_name,
-        shard_id,
-        state.shard_args[:lease_owner],
-        state.app_state_opts
+  def handle_call({:append_shards, child_shards}, _from, state) do
+    shard_pid_map =
+      Enum.reduce(
+        child_shards,
+        state.shard_pid_map,
+        fn %{"ParentShards" => parent_shards, "ShardId" => shard_id}, acc ->
+          maybe_start_shard(parent_shards, shard_id, state, acc)
+        end
       )
 
-    Shard.stop(Shard.name(app_name, sn, shard_id))
-    Process.demonitor(ref, [:flush])
+    shard_map =
+      child_shards
+      |> Enum.group_by(&Map.fetch!(&1, "ShardId"))
+      |> Map.merge(state.shard_map)
 
-    {:noreply, state}
-  end
-
-  def handle_cast({:append_shards, child_shards}, state) do
-    ## TODO Figure out how to append shards to the graph
-
-    ## In the mean time, restarting the consumer will cause the new shards to be picked up
-    ## and processed.
-
-    {:noreply, state}
+    {:reply, :ok, %__MODULE__{state | shard_pid_map: shard_pid_map, shard_map: shard_map}}
   end
 
   def create_table_if_not_exists(state) do
@@ -132,7 +121,7 @@ defmodule KinesisClient.Stream.Coordinator do
 
         map = start_shards(shard_graph, state)
 
-        {:noreply, %{state | shard_graph: shard_graph, shard_ref_map: map}}
+        {:noreply, %{state | shard_graph: shard_graph, shard_pid_map: map}}
 
       {:error, reason} ->
         Logger.info("[kcl_ex] error describing stream shards with result #{inspect(reason)}")
@@ -163,73 +152,71 @@ defmodule KinesisClient.Stream.Coordinator do
         :digraph.add_vertex(graph, shard_id)
       end
 
-      case s do
-        %{"ParentShardId" => parent_shard_id} when not is_nil(parent_shard_id) ->
-          add_vertex(graph, parent_shard_id)
-          :digraph.add_edge(graph, parent_shard_id, shard_id, "parent-child")
-
-          case s["AdjacentParentShardId"] do
-            nil ->
-              :ok
-
-            x when is_binary(x) ->
-              add_vertex(graph, x)
-              :digraph.add_edge(graph, x, shard_id)
-          end
-
-        _ ->
-          :ok
-      end
+      add_parent_shard(graph, s)
     end)
 
     graph
   end
 
+  defp add_parent_shard(graph, %{
+         "ShardId" => shard_id,
+         "ParentShardId" => parent_shard_id,
+         "AdjacentParentShardId" => adj_parent_shard_id
+       })
+       when is_binary(parent_shard_id) do
+    add_vertex(graph, parent_shard_id)
+    :digraph.add_edge(graph, parent_shard_id, shard_id, "parent-child")
+
+    if is_binary(adj_parent_shard_id) do
+      add_vertex(graph, adj_parent_shard_id)
+      :digraph.add_edge(graph, adj_parent_shard_id, shard_id)
+    end
+  end
+
+  defp add_parent_shard(_graph, _shard), do: :ok
+
   defp start_shards(shard_graph, %__MODULE__{} = state) do
     shard_r = list_relationships(shard_graph)
 
-    Enum.reduce(shard_r, state.shard_ref_map, fn {shard_id, parents}, acc ->
-      shard_lease = get_lease(shard_id, state)
+    Enum.reduce(shard_r, state.shard_pid_map, fn {shard_id, parents}, acc ->
+      maybe_start_shard(parents, shard_id, state, acc)
+    end)
+  end
 
-      case parents do
-        [] ->
-          case shard_lease do
-            %{completed: true} ->
-              acc
+  # Shards parents are not available, so we only rely on the shard lease status
+  defp maybe_start_shard([] = _parents, shard_id, state, shard_pid_map) do
+    case get_lease(shard_id, state) do
+      # Completed shards are not added to the shard_pid_map
+      %{completed: true} ->
+        shard_pid_map
 
-            _ ->
-              case start_shard(shard_id, state) do
-                {:ok, pid} -> Map.put(acc, Process.monitor(pid), shard_id)
-              end
-          end
+      _ ->
+        {:ok, shard_pid} = start_shard(shard_id, state)
+        Map.put(shard_pid_map, shard_id, shard_pid)
+    end
+  end
 
-        # handle shard splits
-        [single_parent] ->
-          case get_lease(single_parent, state) do
-            %{completed: true} ->
-              Logger.info("Parent shard #{single_parent} is completed so starting #{shard_id}")
+  defp maybe_start_shard(parents, shard_id, state, shard_pid_map) do
+    if parents_completed?(parents, shard_id, state) do
+      Logger.info("Parent shards are complete so starting #{shard_id}")
 
-              case start_shard(shard_id, state) do
-                {:ok, pid} -> Map.put(acc, Process.monitor(pid), shard_id)
-              end
+      {:ok, shard_pid} = start_shard(shard_id, state)
+      Map.put(shard_pid_map, shard_id, shard_pid)
+    else
+      shard_pid_map
+    end
+  end
 
-            %{completed: false} ->
-              Logger.info("Parent shard #{single_parent} is not completed so skipping #{shard_id}")
-              acc
-          end
+  defp parents_completed?(parents, shard_id, state) do
+    parents
+    |> Enum.map(fn parent -> {parent, get_lease(parent, state)} end)
+    |> Enum.all?(fn
+      {_parent, %{completed: true}} ->
+        true
 
-        # handle shard merges
-        [parent1, parent2] ->
-          case {get_lease(parent1, state), get_lease(parent2, state)} do
-            {%{completed: true}, %{completed: true}} ->
-              case start_shard(shard_id, state) do
-                {:ok, pid} -> Map.put(acc, Process.monitor(pid), shard_id)
-              end
-
-            _ ->
-              acc
-          end
-      end
+      {parent, _} ->
+        Logger.info("Parent shard #{parent} is not completed so skipping #{shard_id}")
+        false
     end)
   end
 
@@ -255,9 +242,14 @@ defmodule KinesisClient.Stream.Coordinator do
         Shard.name(state.app_name, state.stream_name, shard_id)
       )
 
-    {:ok, pid} = Shard.start(shard_supervisor, shard_args)
-    notify({:shard_started, %{pid: pid, shard_id: shard_id}}, state)
-    {:ok, pid}
+    case Shard.start(shard_supervisor, shard_args) do
+      {:ok, pid} ->
+        notify({:shard_started, %{pid: pid, shard_id: shard_id}}, state)
+        {:ok, pid}
+
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+    end
   end
 
   ##

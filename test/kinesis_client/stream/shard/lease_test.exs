@@ -1,8 +1,8 @@
 defmodule KinesisClient.Stream.Shard.LeaseTest do
   use KinesisClient.Case
 
-  alias KinesisClient.Stream.Shard.Lease
   alias KinesisClient.Stream.AppState.ShardLease
+  alias KinesisClient.Stream.Shard.Lease
 
   # TODO This test is failing for as yet unclear reasons
   # Blocking it out for now
