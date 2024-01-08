@@ -90,7 +90,7 @@ When the `KinesisClient.Stream` module starts, it boots up two processes:
 
 1. A Dynamic Supervisor for handling each shard that comes and goes
 2. A [KinesisClient.Stream.Coordinator](lib/kinesis_client/stream/coordinator.ex) process that
-   handles starting shards that are ready to be processed. As shards split and merge, they notify the coordinator process and then shut themselves down. THe coordinator then handles adding those new shards to the pipeline.
+   handles starting shards that are ready to be processed. As shards split and merge, they notify the coordinator process and then shut themselves down. The coordinator then handles adding those new shards to the pipeline.
 3. Each [KinesisClient.Stream.Shard](lib/kinesis_client/stream/shard.ex) supervisor starts a [KinesisClient.Stream.Lease](lib/kinesis_client/stream/shard/lease.ex) to take and maintain exclusive access to the Kinesis shard. By default, it uses the DynamoDB table to record which shard is being processed by which node, and the sequence number of the most recently processed record.
 4. Each `Shard` also starts a [`Pipeline`](lib/kinesis_client/stream/shard/pipeline.ex) process. This sets up the Broadway pipeline that will process the given Shard (although it starts in a `stopped` state, and waits for the `Lease` to send a message indicating it is ready to start processing). The Broadway pipeline producer module is the `KinesisClient.Stream.Shard.Producer` module, which is responsible for fetching records from the Kinesis shard and passing them to the Broadway pipeline. The `Pipeline` delegates the broadway callbacks to the `shard_consumer` module passed in as an option to the `KinesisClient.Stream` module.
 
@@ -109,6 +109,7 @@ SERVICES=kinesis,dynamodb localstack start --host
 - [x] Test shard merges and splits more thoroughly
 - [ ] Adaptively respond to rate limits from Kinesis and GenStage demand so that we don't get throttled
 - [ ] Support [enhanced fanout](https://docs.aws.amazon.com/streams/latest/dev/enhanced-consumers.html) for higher throughput
+- [ ] Support different shard iterator types (https://docs.aws.amazon.com/kinesis/latest/APIReference/API_GetShardIterator.html#API_GetShardIterator_RequestSyntax) and configuring them in the `KinesisClient.Stream` module
 - [ ] Support more than just Dynamo for tracking state (e.g. Redis or Postgres)
 - [ ] Consider integrating with Phoenix PubSub so that shard splits and merges can be broadcast to other nodes in the cluster, which can then start/stop the relevant Broadway pipelines.
 - [ ] Consider starting just one Broadway pipeline, and having shards feed into the same pipeline. This would make it operate more like other broadway adapters, since kcl_ex wraps broadway with its own supervision tree.

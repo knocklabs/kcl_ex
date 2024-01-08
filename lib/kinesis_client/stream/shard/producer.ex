@@ -168,12 +168,9 @@ defmodule KinesisClient.Stream.Shard.Producer do
         "shard_id: #{state.shard_id}"
     )
 
-    if state.status == :closed do
-      state = handle_closed_shard(state)
-      {:noreply, [], state}
-    else
-      {:noreply, [], state}
-    end
+    # state = handle_closed_shard(state)
+
+    {:noreply, [], state}
   end
 
   @impl GenStage
@@ -228,12 +225,8 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
     GenStage.reply(from, :ok)
 
-    if new_state.status == :closed do
-      new_state = handle_closed_shard(new_state)
-      {:noreply, records, new_state}
-    else
-      {:noreply, records, new_state}
-    end
+    # new_state = handle_closed_shard(new_state)
+    {:noreply, records, new_state}
   end
 
   @impl GenStage

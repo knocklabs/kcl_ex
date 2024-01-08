@@ -28,6 +28,7 @@ defmodule KinesisClient.Stream.Coordinator do
     # unique reference used to identify this instance KinesisClient.Stream
     :worker_ref,
     :shard_args,
+    # TODO Remove this since it's not actually used.
     shard_pid_map: %{},
     startup_attempt: 1
   ]
@@ -47,6 +48,10 @@ defmodule KinesisClient.Stream.Coordinator do
   def start_link(args) do
     GenServer.start_link(__MODULE__, args, name: args[:name])
   end
+
+  # Sometimes the child shards come through as nil. This is because the shard may
+  # have been truncated. In this case, we don't want to start any new shards.
+  # def append_shards(_, nil), do: :ok
 
   def append_shards(coordinator, child_shards) do
     GenServer.call(coordinator, {:append_shards, child_shards})
@@ -98,7 +103,7 @@ defmodule KinesisClient.Stream.Coordinator do
 
     shard_map =
       child_shards
-      |> Enum.group_by(&Map.fetch!(&1, "ShardId"))
+      |> Map.new(&{Map.fetch!(&1, "ShardId"), &1})
       |> Map.merge(state.shard_map)
 
     {:reply, :ok, %__MODULE__{state | shard_pid_map: shard_pid_map, shard_map: shard_map}}
@@ -189,7 +194,7 @@ defmodule KinesisClient.Stream.Coordinator do
   # Shards parents are not available, so we only rely on the shard lease status
   defp maybe_start_shard([] = _parents, shard_id, state, shard_pid_map) do
     case get_lease(shard_id, state) do
-      # Completed shards are not added to the shard_pid_map
+      # Completed shards are not started
       %{completed: true} ->
         shard_pid_map
 
