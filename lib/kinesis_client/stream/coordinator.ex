@@ -72,7 +72,7 @@ defmodule KinesisClient.Stream.Coordinator do
       retry_timeout: Keyword.get(opts, :retry_timeout, 30_000)
     }
 
-    Logger.debug("Starting KinesisClient.Stream.Coordinator: #{inspect(state)}")
+    Logger.debug("[kcl_ex] Starting KinesisClient.Stream.Coordinator: #{inspect(state)}")
     {:ok, state, {:continue, :initialize}}
   end
 
@@ -132,7 +132,7 @@ defmodule KinesisClient.Stream.Coordinator do
         {:noreply, %{state | shard_graph: shard_graph, shard_pid_map: map}}
 
       {:error, reason} ->
-        Logger.info("[kcl_ex] error describing stream shards with result #{inspect(reason)}")
+        Logger.error("[kcl_ex] error describing stream shards with result #{inspect(reason)}")
 
         if state.startup_attempt < @max_startup_attempts do
           sleep_period_ms = state.retry_timeout + :rand.uniform(@jitter)
@@ -143,9 +143,7 @@ defmodule KinesisClient.Stream.Coordinator do
 
           {:noreply, state, {:continue, :describe_stream}}
         else
-          Logger.error(
-            "[kcl_ex] error starting stream coordinator after three attempts for stream #{state.stream_name}"
-          )
+          Logger.error("[kcl_ex] error starting stream coordinator after three attempts for stream #{state.stream_name}")
 
           {:stop, :normal, state}
         end
@@ -206,7 +204,7 @@ defmodule KinesisClient.Stream.Coordinator do
 
   defp maybe_start_shard(parents, shard_id, state, shard_pid_map) do
     if parents_completed?(parents, shard_id, state) and not shard_completed?(shard_id, state) do
-      Logger.info("Parent shards are complete and child is not, so starting #{shard_id}")
+      Logger.info("[kcl_ex] Parent shards are complete and child is not, so starting #{shard_id}")
 
       {:ok, shard_pid} = start_shard(shard_id, state)
       Map.put(shard_pid_map, shard_id, shard_pid)
@@ -223,7 +221,7 @@ defmodule KinesisClient.Stream.Coordinator do
         true
 
       {parent, _} ->
-        Logger.info("Parent shard #{parent} is not completed so skipping #{shard_id}")
+        Logger.info("[kcl_ex] Parent shard #{parent} is not completed so skipping #{shard_id}")
         false
     end)
   end

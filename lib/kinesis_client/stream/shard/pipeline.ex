@@ -55,6 +55,10 @@ defmodule KinesisClient.Stream.Shard.Pipeline do
 
     pipeline_opts = [
       name: name(opts[:app_name], opts[:shard_id]),
+      # 5 minutes was the default behavior for kcl_ex, previously
+      # handled using Process.send_after.
+      # This ensures shard split/merges finish processing messages.
+      shutdown: :timer.minutes(5),
       producer: [
         module: {Producer, producer_opts},
         concurrency: 1

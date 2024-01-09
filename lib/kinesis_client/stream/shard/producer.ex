@@ -68,7 +68,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
     :telemetry.execute([:kinesis_client, :shard_producer, :started], %{}, telemetry_meta(state))
 
-    Logger.debug("Starting KinesisClient.Stream.Shard.Producer: #{inspect(state)}")
+    Logger.debug("[kcl_ex] Starting KinesisClient.Stream.Shard.Producer: #{inspect(state)}")
     {:producer, state}
   end
 
@@ -82,19 +82,19 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
   @impl GenStage
   def handle_demand(_, %{demand: demand, status: :closed} = state) do
-    Logger.info("Shard is closed, not storing demand")
+    Logger.info("[kcl_ex] Shard is closed, not storing demand")
     {:noreply, [], %{state | demand: demand}}
   end
 
   @impl GenStage
   def handle_demand(incoming_demand, %{demand: demand} = state) do
-    Logger.debug("Received incoming demand: #{incoming_demand}")
+    Logger.debug("[kcl_ex] Received incoming demand: #{incoming_demand}")
     get_records(%{state | demand: demand + incoming_demand})
   end
 
   @impl GenStage
   def handle_info(:get_records, %{poll_timer: nil} = state) do
-    Logger.debug("Poll timer is nil")
+    Logger.debug("[kcl_ex] Poll timer is nil")
     {:noreply, [], state}
   end
 
@@ -103,7 +103,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
     notify(:poll_timer_executed, state)
 
     Logger.debug(
-      "Try to fulfill pending demand #{state.demand}: " <>
+      "[kcl_ex] Try to fulfill pending demand #{state.demand}: " <>
         "[app_name: #{state.app_name}, shard_id: #{state.shard_id}]"
     )
 
@@ -115,7 +115,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
         %{coordinator_name: coordinator, shard_id: shard_id, child_shards: child_shards} = state
       ) do
     Logger.info(
-      "Shard is closed, notifying Coordinator: [app_name: #{state.app_name}, " <>
+      "[kcl_ex] Shard is closed, notifying Coordinator: [app_name: #{state.app_name}, " <>
         "shard_id: #{state.shard_id}]"
     )
 
@@ -149,7 +149,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
       :ok = update_checkpoint(state, checkpoint)
     else
       Logger.warn("""
-        Unable to update checkpoint for app_name: #{state.app_name}, shard_id: #{state.shard_id}
+        [kcl_ex] Unable to update checkpoint for app_name: #{state.app_name}, shard_id: #{state.shard_id}
 
         This might happen for a few reasons (in order of likelihood):
         1. You are writing tests, and your messages need something like %{metadata: %{"SequenceNumber" => "SomeStringHere"}}
@@ -168,14 +168,12 @@ defmodule KinesisClient.Stream.Shard.Producer do
         "shard_id: #{state.shard_id}"
     )
 
-    # state = handle_closed_shard(state)
-
     {:noreply, [], state}
   end
 
   @impl GenStage
   def handle_info(msg, state) do
-    Logger.debug("#{__MODULE__} got an unhandled message #{inspect(msg)}")
+    Logger.debug("[kcl_ex] #{__MODULE__} got an unhandled message #{inspect(msg)}")
     {:noreply, [], state}
   end
 
@@ -304,7 +302,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
          "Records" => records
        }} ->
         Logger.debug(
-          "Received #{length(records)} records (#{millis_behind_latest} ms behind latest) for #{state.app_name}-#{state.shard_id}"
+          "[kcl_ex] Received #{length(records)} records (#{millis_behind_latest} ms behind latest) for #{state.app_name}-#{state.shard_id}"
         )
 
         new_demand = demand - length(records)
@@ -343,7 +341,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
       {:ok, %{"ChildShards" => child_shards, "MillisBehindLatest" => _, "Records" => []}} ->
         Logger.debug(
-          "Shard #{state.shard_id} has child shards: #{inspect(child_shards)} - the current shard will now close"
+          "[kcl_ex] Shard #{state.shard_id} has child shards: #{inspect(child_shards)} - the current shard will now close"
         )
 
         state = handle_closed_shard(%{state | child_shards: child_shards})
@@ -352,7 +350,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
       {:error, reason} ->
         Logger.info(
-          "Received error when getting records for #{state.app_name}-#{state.shard_id}: #{inspect(reason)}"
+          "[kcl_ex] Received error when getting records for #{state.app_name}-#{state.shard_id}: #{inspect(reason)}"
         )
 
         :telemetry.execute(
