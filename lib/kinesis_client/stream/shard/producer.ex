@@ -13,7 +13,6 @@ defmodule KinesisClient.Stream.Shard.Producer do
   alias KinesisClient.Kinesis
   alias KinesisClient.Stream.AppState
   alias KinesisClient.Stream.Coordinator
-  alias KinesisClient.Stream.Shard
   @behaviour Broadway.Producer
 
   defstruct [
@@ -119,18 +118,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
         "shard_id: #{state.shard_id}]"
     )
 
-    :ok =
-      AppState.close_shard(
-        state.app_name,
-        shard_id,
-        state.lease_owner,
-        state.app_state_opts
-      )
-
-    :ok = Coordinator.append_shards(coordinator, child_shards)
-
-    Shard.name(state.app_name, state.stream_name, shard_id)
-    |> Shard.stop()
+    :ok = Coordinator.continue_shard_with_children(coordinator, shard_id, child_shards)
 
     {:noreply, [], %{state | status: :closed}}
   end

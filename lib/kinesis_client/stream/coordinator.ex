@@ -28,8 +28,9 @@ defmodule KinesisClient.Stream.Coordinator do
     # unique reference used to identify this instance KinesisClient.Stream
     :worker_ref,
     :shard_args,
-    # TODO Remove this since it's not actually used.
     shard_pid_map: %{},
+    # Used to keep track of child shards that are waiting for their parent to complete
+    child_shards_by_parent_shard_id: %{},
     startup_attempt: 1
   ]
 
@@ -49,9 +50,9 @@ defmodule KinesisClient.Stream.Coordinator do
     GenServer.start_link(__MODULE__, args, name: args[:name])
   end
 
-  # Sometimes the child shards come through as nil. This is because the shard may
-  # have been truncated. In this case, we don't want to start any new shards.
-  # def append_shards(_, nil), do: :ok
+  def continue_shard_with_children(coordinator, shard_id, child_shards) do
+    GenServer.call(coordinator, {:continue_shard_with_children, shard_id, child_shards})
+  end
 
   def append_shards(coordinator, child_shards) do
     GenServer.call(coordinator, {:append_shards, child_shards})
@@ -86,6 +87,14 @@ defmodule KinesisClient.Stream.Coordinator do
     describe_stream(state)
   end
 
+  def handle_continue({:stop_shard, shard_id}, state) do
+    :ok =
+      Shard.name(state.app_name, state.stream_name, shard_id)
+      |> Shard.stop()
+
+    {:noreply, state}
+  end
+
   @impl GenServer
   def handle_call(:get_graph, _from, %{shard_graph: graph} = s) do
     {:reply, graph, s}
@@ -107,6 +116,56 @@ defmodule KinesisClient.Stream.Coordinator do
       |> Map.merge(state.shard_map)
 
     {:reply, :ok, %__MODULE__{state | shard_pid_map: shard_pid_map, shard_map: shard_map}}
+  end
+
+  def handle_call(
+        {:continue_shard_with_children, shard_id, child_shards},
+        _from,
+        %__MODULE__{child_shards_by_parent_shard_id: child_shard_map} = state
+      ) do
+    :ok =
+      AppState.close_shard(
+        state.app_name,
+        shard_id,
+        state.shard_args[:lease_owner],
+        state.app_state_opts
+      )
+
+    shard_pid = state.shard_pid_map[shard_id]
+
+    child_shard_map = Map.merge(child_shard_map, %{shard_pid => child_shards})
+
+    {:reply, :ok, %__MODULE__{state | child_shards_by_parent_shard_id: child_shard_map},
+     {:continue, {:stop_shard, shard_id}}}
+  end
+
+  @impl GenServer
+  def handle_info(
+        {:DOWN, _ref, :process, shard_pid, :normal},
+        %__MODULE__{child_shards_by_parent_shard_id: child_shard_map, shard_pid_map: shard_pid_map} =
+          state
+      ) do
+    shard_pid_map =
+      child_shard_map
+      |> Map.get(shard_pid, [])
+      |> Enum.reduce(shard_pid_map, fn %{"ParentShards" => parent_shards, "ShardId" => shard_id},
+                                       acc ->
+        maybe_start_shard(parent_shards, shard_id, state, acc)
+      end)
+
+    {maybe_shard_id, ^shard_pid} =
+      shard_pid_map
+      |> Enum.find(fn {_key, value} -> value == shard_pid end)
+
+    shard_pid_map = Map.delete(shard_pid_map, maybe_shard_id)
+    child_shard_map = Map.delete(child_shard_map, shard_pid)
+
+    {:noreply,
+     %__MODULE__{
+       state
+       | child_shards_by_parent_shard_id: child_shard_map,
+         shard_pid_map: shard_pid_map
+     }}
   end
 
   def create_table_if_not_exists(state) do
@@ -143,7 +202,9 @@ defmodule KinesisClient.Stream.Coordinator do
 
           {:noreply, state, {:continue, :describe_stream}}
         else
-          Logger.error("[kcl_ex] error starting stream coordinator after three attempts for stream #{state.stream_name}")
+          Logger.error(
+            "[kcl_ex] error starting stream coordinator after three attempts for stream #{state.stream_name}"
+          )
 
           {:stop, :normal, state}
         end
@@ -164,14 +225,18 @@ defmodule KinesisClient.Stream.Coordinator do
     graph
   end
 
-  defp add_parent_shard(graph, %{
-         "ShardId" => shard_id,
-         "ParentShardId" => parent_shard_id,
-         "AdjacentParentShardId" => adj_parent_shard_id
-       })
+  defp add_parent_shard(
+         graph,
+         %{
+           "ShardId" => shard_id,
+           "ParentShardId" => parent_shard_id
+         } = shard
+       )
        when is_binary(parent_shard_id) do
     add_vertex(graph, parent_shard_id)
     :digraph.add_edge(graph, parent_shard_id, shard_id, "parent-child")
+
+    adj_parent_shard_id = Map.get(shard, "AdjacentParentShardId")
 
     if is_binary(adj_parent_shard_id) do
       add_vertex(graph, adj_parent_shard_id)
@@ -261,6 +326,7 @@ defmodule KinesisClient.Stream.Coordinator do
     case Shard.start(shard_supervisor, shard_args) do
       {:ok, pid} ->
         notify({:shard_started, %{pid: pid, shard_id: shard_id}}, state)
+        Process.monitor(pid)
         {:ok, pid}
 
       {:error, {:already_started, pid}} ->
