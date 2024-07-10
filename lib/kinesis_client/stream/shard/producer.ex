@@ -142,7 +142,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
     if checkpoint != "-1" do
       :ok = update_checkpoint(state, checkpoint)
     else
-      Logger.warn("""
+      Logger.warning("""
         [kcl_ex] Unable to update checkpoint for app_name: #{state.app_name}, shard_id: #{state.shard_id}, stream_name: #{state.stream_name}
 
         This might happen for a few reasons (in order of likelihood):

@@ -23,6 +23,8 @@ defmodule KinesisClient.Stream do
     * `:lease_expiry`(optional) - The lenght of time in milliseconds that least lasts for. If a
       lease is not renewed within this time frame, then that lease is considered expired and can be
       taken by another process. Defaults to 90 seconds.
+    * `:can_acquire_lease?` - A function that determines if a lease can be acquired. The function
+      should take a single argument, the shard_id, and return a boolean. Defaults to `fn _ -> true end`.
   """
   def start_link(opts) do
     Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -52,6 +54,7 @@ defmodule KinesisClient.Stream do
       |> optional_kw(:app_state_opts, Keyword.get(opts, :app_state_opts))
       |> optional_kw(:lease_renew_interval, Keyword.get(opts, :lease_renew_interval))
       |> optional_kw(:lease_expiry, Keyword.get(opts, :lease_expiry))
+      |> optional_kw(:can_acquire_lease?, Keyword.get(opts, :can_acquire_lease?))
 
     coordinator_args = [
       name: coordinator_name,
