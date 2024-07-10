@@ -35,7 +35,8 @@ defmodule KinesisClient.Stream.Shard.Lease do
     :renew_interval,
     :notify,
     :lease_expiry,
-    :lease_holder
+    :lease_holder,
+    :can_acquire_lease?
   ]
 
   @type t :: %__MODULE__{}
@@ -50,7 +51,8 @@ defmodule KinesisClient.Stream.Shard.Lease do
       renew_interval: Keyword.get(opts, :renew_interval, @default_renew_interval),
       lease_expiry: Keyword.get(opts, :lease_expiry, @default_lease_expiry),
       lease_count_increment_time: current_time(),
-      notify: Keyword.get(opts, :notify)
+      notify: Keyword.get(opts, :notify),
+      can_acquire_lease?: Keyword.get(opts, :can_acquire_lease?, &default_can_acquire_lease?/1)
     }
 
     Process.send_after(self(), :take_or_renew_lease, state.renew_interval)
@@ -59,6 +61,8 @@ defmodule KinesisClient.Stream.Shard.Lease do
 
     {:ok, state, {:continue, :initialize}}
   end
+
+  def default_can_acquire_lease?(_), do: true
 
   @impl GenServer
   def handle_continue(:initialize, state) do
@@ -149,74 +153,87 @@ defmodule KinesisClient.Stream.Shard.Lease do
 
   @spec create_lease(state :: t()) :: t()
   defp create_lease(%{app_state_opts: opts, app_name: app_name, lease_owner: lease_owner} = state) do
-    Logger.debug(
-      "[kcl_ex] Creating lease: [app_name: #{app_name}, shard_id: #{state.shard_id}, lease_owner: " <>
-        "#{lease_owner}]"
-    )
+    if state.can_acquire_lease?.(state.shard_id) do
+      Logger.debug(
+        "[kcl_ex] Creating lease: [app_name: #{app_name}, shard_id: #{state.shard_id}, lease_owner: " <>
+          "#{lease_owner}]"
+      )
 
-    case AppState.create_lease(app_name, state.shard_id, lease_owner, opts) do
-      :ok -> %{state | lease_holder: true, lease_count: 1}
-      :already_exists -> %{state | lease_holder: false}
+      case AppState.create_lease(app_name, state.shard_id, lease_owner, opts) do
+        :ok -> %{state | lease_holder: true, lease_count: 1}
+        :already_exists -> %{state | lease_holder: false}
+      end
+    else
+      %{state | lease_holder: false}
     end
   end
 
   @spec renew_lease(shard_lease :: ShardLease.t(), state :: t()) :: t()
   defp renew_lease(shard_lease, %{app_state_opts: opts, app_name: app_name} = state) do
-    expected = shard_lease.lease_count + 1
+    if state.can_acquire_lease?.(state.shard_id) do
+      expected = shard_lease.lease_count + 1
 
-    Logger.debug(
-      "[kcl_ex] Renewing lease: [app_name: #{app_name}, shard_id: #{state.shard_id}, lease_owner: " <>
-        "#{state.lease_owner}]"
-    )
+      Logger.debug(
+        "[kcl_ex] Renewing lease: [app_name: #{app_name}, shard_id: #{state.shard_id}, lease_owner: " <>
+          "#{state.lease_owner}]"
+      )
 
-    case AppState.renew_lease(app_name, shard_lease, opts) do
-      {:ok, ^expected} ->
-        state = set_lease_count(expected, true, state)
-        notify({:lease_renewed, state}, state)
-        state
+      case AppState.renew_lease(app_name, shard_lease, opts) do
+        {:ok, ^expected} ->
+          state = set_lease_count(expected, true, state)
+          notify({:lease_renewed, state}, state)
+          state
 
-      {:error, :lease_renew_failed} ->
-        Logger.debug(
-          "[kcl_ex] Failed to renew lease, stopping producer: [app_name: #{app_name}, " <>
-            "shard_id: #{state.shard_id}, lease_owner: #{state.lease_owner}]"
-        )
+        {:error, :lease_renew_failed} ->
+          Logger.debug(
+            "[kcl_ex] Failed to renew lease, stopping producer: [app_name: #{app_name}, " <>
+              "shard_id: #{state.shard_id}, lease_owner: #{state.lease_owner}]"
+          )
 
-        :ok = Pipeline.stop(app_name, state.shard_id)
-        %{state | lease_holder: false, lease_count_increment_time: current_time()}
+          :ok = Pipeline.stop(app_name, state.shard_id)
+          %{state | lease_holder: false, lease_count_increment_time: current_time()}
 
-      {:error, e} ->
-        Logger.error(
-          "[kcl_ex] Error trying to renew lease for #{state.shard_id} app_name #{app_name}: #{inspect(e)}"
-        )
+        {:error, e} ->
+          Logger.error(
+            "[kcl_ex] Error trying to renew lease for #{state.shard_id} app_name #{app_name}: #{inspect(e)}"
+          )
 
-        state
+          state
+      end
+    else
+      :ok = Pipeline.stop(app_name, state.shard_id)
+      %{state | lease_holder: false, lease_count_increment_time: current_time()}
     end
   end
 
   defp take_lease(_shard_lease, %{app_state_opts: opts, app_name: app_name} = state) do
-    expected = state.lease_count + 1
+    if state.can_acquire_lease?.(state.shard_id) do
+      expected = state.lease_count + 1
 
-    Logger.debug(
-      "[kcl_ex] Attempting to take lease: [app_name: #{app_name}, lease_owner: #{state.lease_owner}, shard_id: #{state.shard_id}]"
-    )
+      Logger.debug(
+        "[kcl_ex] Attempting to take lease: [app_name: #{app_name}, lease_owner: #{state.lease_owner}, shard_id: #{state.shard_id}]"
+      )
 
-    case AppState.take_lease(app_name, state.shard_id, state.lease_owner, state.lease_count, opts) do
-      {:ok, ^expected} ->
-        state = %{
+      case AppState.take_lease(app_name, state.shard_id, state.lease_owner, state.lease_count, opts) do
+        {:ok, ^expected} ->
+          state = %{
+            state
+            | lease_holder: true,
+              lease_count: expected,
+              lease_count_increment_time: current_time()
+          }
+
+          notify({:lease_taken, state}, state)
+          :ok = Pipeline.start(app_name, state.shard_id)
           state
-          | lease_holder: true,
-            lease_count: expected,
-            lease_count_increment_time: current_time()
-        }
 
-        notify({:lease_taken, state}, state)
-        :ok = Pipeline.start(app_name, state.shard_id)
-        state
-
-      {:error, :lease_take_failed} ->
-        # TODO
-        # :ok = Processor.ensure_halted(state)
-        %{state | lease_holder: false, lease_count_increment_time: current_time()}
+        {:error, :lease_take_failed} ->
+          :ok = Pipeline.stop(app_name, state.shard_id)
+          %{state | lease_holder: false, lease_count_increment_time: current_time()}
+      end
+    else
+      :ok = Pipeline.stop(app_name, state.shard_id)
+      %{state | lease_holder: false, lease_count_increment_time: current_time()}
     end
   end
 
