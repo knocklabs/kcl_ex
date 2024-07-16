@@ -228,13 +228,11 @@ defmodule KinesisClient.Stream.Shard.Lease do
           state
 
         {:error, :lease_take_failed} ->
-          # TODO
-          # :ok = Processor.ensure_halted(state)
+          :ok = Pipeline.stop(app_name, state.shard_id)
           %{state | lease_holder: false, lease_count_increment_time: current_time()}
       end
     else
-      # TODO
-      # :ok = Processor.ensure_halted(state)
+      :ok = Pipeline.stop(app_name, state.shard_id)
       %{state | lease_holder: false, lease_count_increment_time: current_time()}
     end
   end
