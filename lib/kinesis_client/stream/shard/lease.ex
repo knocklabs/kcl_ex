@@ -153,7 +153,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
 
   @spec create_lease(state :: t()) :: t()
   defp create_lease(%{app_state_opts: opts, app_name: app_name, lease_owner: lease_owner} = state) do
-    if state.can_acquire_lease?.(state.shard_id) do
+    if state.can_acquire_lease?.("#{app_name}:#{state.shard_id}") do
       Logger.debug(
         "[kcl_ex] Creating lease: [app_name: #{app_name}, shard_id: #{state.shard_id}, lease_owner: " <>
           "#{lease_owner}]"
@@ -170,7 +170,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
 
   @spec renew_lease(shard_lease :: ShardLease.t(), state :: t()) :: t()
   defp renew_lease(shard_lease, %{app_state_opts: opts, app_name: app_name} = state) do
-    if state.can_acquire_lease?.(state.shard_id) do
+    if state.can_acquire_lease?.("#{app_name}:#{state.shard_id}") do
       expected = shard_lease.lease_count + 1
 
       Logger.debug(
@@ -207,7 +207,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
   end
 
   defp take_lease(_shard_lease, %{app_state_opts: opts, app_name: app_name} = state) do
-    if state.can_acquire_lease?.(state.shard_id) do
+    if state.can_acquire_lease?.("#{app_name}:#{state.shard_id}") do
       expected = state.lease_count + 1
 
       Logger.debug(
