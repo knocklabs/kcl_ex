@@ -229,7 +229,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
     {:reply, :ok, [], %{state | status: :stopped}}
   end
 
-  defp update_checkpoint(%__MODULE__{} = state, checkpoint) do
+  defp update_checkpoint(%__MODULE__{} = state, checkpoint, attempt \\ 1) do
     meta = telemetry_meta(state)
 
     :telemetry.span([:kinesis_client, :shard_producer, :update_checkpoint], meta, fn ->
@@ -247,6 +247,23 @@ defmodule KinesisClient.Stream.Shard.Producer do
           raise KinesisClient.Error,
             message:
               "Checkpoint failed for #{state.app_name}-#{state.shard_id}: this consumer is not the lease owner"
+
+        {:error, {"ProvisionedThroughputExceededException", _}} ->
+          if attempt > 10 do
+            raise KinesisClient.Error,
+              message:
+                "Checkpoint failed for #{state.app_name}-#{state.shard_id}: provisioned throughput exceeded after 10 attempts"
+          end
+
+          :telemetry.execute(
+            [:kinesis_client, :shard_producer, :checkpoint_error],
+            %{reason: :provisioned_throughput_exceeded, attempt: attempt},
+            telemetry_meta(state)
+          )
+
+          # Retry on failure to update checkpoint after jittery sleep
+          Process.sleep((100 + :rand.uniform() * 100) |> floor())
+          update_checkpoint(state, checkpoint, attempt + 1)
 
         unknown ->
           raise KinesisClient.Error,
