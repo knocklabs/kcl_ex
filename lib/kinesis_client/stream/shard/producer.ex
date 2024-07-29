@@ -13,7 +13,11 @@ defmodule KinesisClient.Stream.Shard.Producer do
   alias KinesisClient.Kinesis
   alias KinesisClient.Stream.AppState
   alias KinesisClient.Stream.Coordinator
+
   @behaviour Broadway.Producer
+
+  # Exponential backoff at 5 retries is 1600 ms + jitter
+  @max_update_checkpoint_retries 5
 
   defstruct [
     :coordinator_name,
@@ -249,7 +253,13 @@ defmodule KinesisClient.Stream.Shard.Producer do
               "Checkpoint failed for #{state.app_name}-#{state.shard_id}: this consumer is not the lease owner"
 
         {:error, {"ProvisionedThroughputExceededException", _}} ->
-          if attempt > 10 do
+          if attempt > @max_update_checkpoint_retries do
+            :telemetry.execute(
+              [:kinesis_client, :shard_producer, :checkpoint_error],
+              %{reason: :provisioned_throughput_exceeded, fatal: true},
+              telemetry_meta(state)
+            )
+
             raise KinesisClient.Error,
               message:
                 "Checkpoint failed for #{state.app_name}-#{state.shard_id}: provisioned throughput exceeded after 10 attempts"
@@ -257,12 +267,13 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
           :telemetry.execute(
             [:kinesis_client, :shard_producer, :checkpoint_error],
-            %{reason: :provisioned_throughput_exceeded, attempt: attempt},
+            %{reason: :provisioned_throughput_exceeded, fatal: false},
             telemetry_meta(state)
           )
 
-          # Retry on failure to update checkpoint after jittery sleep
-          Process.sleep((100 + :rand.uniform() * 100) |> floor())
+          # Exponential backoff sleep
+          Process.sleep(floor(50 * :math.pow(2, attempt) + :rand.uniform() * 100))
+
           update_checkpoint(state, checkpoint, attempt + 1)
 
         unknown ->
