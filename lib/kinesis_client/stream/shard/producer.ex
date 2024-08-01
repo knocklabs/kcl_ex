@@ -16,8 +16,9 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
   @behaviour Broadway.Producer
 
-  # Exponential backoff at 5 retries is 1600 ms + jitter
-  @max_update_checkpoint_retries 5
+  # Exponential backoff at 10 retries is 51,200 ms + jitter
+  # Total time spent is 102,300 ms plus jitter
+  @max_update_checkpoint_retries 10
 
   defstruct [
     :coordinator_name,
@@ -262,7 +263,7 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
             raise KinesisClient.Error,
               message:
-                "Checkpoint failed for #{state.app_name}-#{state.shard_id}: provisioned throughput exceeded after 10 attempts"
+                "Checkpoint failed for #{state.app_name}-#{state.shard_id}: provisioned throughput exceeded after #{@max_update_checkpoint_retries} attempts"
           end
 
           :telemetry.execute(
