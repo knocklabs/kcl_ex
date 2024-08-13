@@ -77,7 +77,13 @@ defmodule KinesisClient.Stream.Shard.Pipeline do
     names = Broadway.producer_names(name(app_name, shard_id))
 
     errors =
-      Enum.reduce(names, [], fn name, errs ->
+      names
+      |> Enum.reject(fn name ->
+        name
+        |> Process.whereis()
+        |> is_nil()
+      end)
+      |> Enum.reduce([], fn name, errs ->
         case Producer.start(name) do
           :ok ->
             errs
@@ -97,9 +103,18 @@ defmodule KinesisClient.Stream.Shard.Pipeline do
     names = Broadway.producer_names(name(app_name, shard_id))
 
     errors =
-      Enum.reduce(names, [], fn name, errs ->
+      names
+      |> Enum.reject(fn name ->
+        name
+        |> Process.whereis()
+        |> is_nil()
+      end)
+      |> Enum.reduce([], fn name, errs ->
         case Producer.stop(name) do
           :ok ->
+            errs
+
+          {:error, :not_found} ->
             errs
 
           other ->
