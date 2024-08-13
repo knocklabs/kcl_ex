@@ -114,9 +114,6 @@ defmodule KinesisClient.Stream.Shard.Pipeline do
           :ok ->
             errs
 
-          {:error, :not_found} ->
-            errs
-
           other ->
             [other | errs]
         end
