@@ -5,7 +5,7 @@ defmodule KinesisClient.Mixfile do
     [
       app: :kinesis_client,
       version: "1.0.0-rc.0",
-      elixir: "~> 1.7",
+      elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       package: package(),
@@ -54,7 +54,8 @@ defmodule KinesisClient.Mixfile do
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:ex_aws, "~> 2.0"},
-      {:ex_aws_dynamo, "~> 4.0"},
+      # TODO: Remove once ex_aws_dynamo is updated to 4.2.2 or greater
+      {:ex_aws_dynamo, git: "https://github.com/ex-aws/ex_aws_dynamo", ref: "a5cb6b4f93b084f15d01c2e2f2bc1a456547a277"},
       {:ex_aws_kinesis, "~> 2.0"},
       {:excoveralls, "~> 0.10", only: :test},
       {:ex_doc, "~> 0.21", only: :dev, runtime: false},
@@ -62,7 +63,7 @@ defmodule KinesisClient.Mixfile do
       {:jason, "~> 1.1"},
       {:mix_test_watch, "~> 1.0", only: :dev, runtime: false},
       {:mox, "~> 1.0", only: :test},
-      {:telemetry, "~> 1.1.0"}
+      {:telemetry, "~> 1.1"}
     ]
   end
 end
