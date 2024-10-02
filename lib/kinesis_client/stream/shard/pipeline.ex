@@ -52,6 +52,7 @@ defmodule KinesisClient.Stream.Shard.Pipeline do
       opts
       |> Keyword.get(:pipeline_context, %{})
       |> Map.put(:shard_consumer, opts[:shard_consumer])
+      |> Map.put(:shard_id, opts[:shard_id])
 
     pipeline_opts = [
       name: name(opts[:app_name], opts[:shard_id]),
