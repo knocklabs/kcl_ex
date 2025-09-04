@@ -50,7 +50,7 @@ defmodule KinesisClient.Mixfile do
   defp deps do
     [
       {:broadway, "~> 1.0"},
-      {:configparser_ex, "~> 4.0"},
+      {:configparser_ex, "~> 5.0"},
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:ex_aws, "~> 2.0"},
