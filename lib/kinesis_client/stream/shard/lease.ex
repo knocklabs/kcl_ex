@@ -78,6 +78,13 @@ defmodule KinesisClient.Stream.Shard.Lease do
 
         %ShardLease{} = s ->
           take_or_renew_lease(s, state)
+
+        {:error, e} ->
+          Logger.error(
+            "[kcl_ex] Error fetching lease during init for #{state.shard_id} (app_name: #{state.app_name}): #{inspect(e)}"
+          )
+
+          state
       end
 
     if new_state.lease_holder do
