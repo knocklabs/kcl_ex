@@ -28,6 +28,10 @@ defmodule KinesisClient.Stream do
     * `:worker_ref` - A function that returns the unique reference (as a string) for the worker attempting
       to acquire the lease. The function doesn't take any arguments, and must return a string. Defaults to
       a random string of the format "worker-<random_number>".
+    * `:rate_limited_retry_timeout` - The amount of time in milliseconds to wait before
+      retrying to acquire a lease after receiving a rate limit exception from AWS. Defaults to 30 seconds.
+    * `:rate_limited_retry_jitter` - The amount of time in milliseconds to add as jitter to the
+      `:rate_limited_retry_timeout`.
   """
   def start_link(opts) do
     Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -40,6 +44,8 @@ defmodule KinesisClient.Stream do
     {shard_supervisor_spec, shard_supervisor_name} = get_shard_supervisor(opts)
     coordinator_name = get_coordinator_name(opts)
     shard_consumer = get_shard_consumer(opts)
+    retry_timeout = Keyword.get(opts, :retry_timeout, 30_000)
+    retry_jitter = Keyword.get(opts, :rate_limited_retry_jitter, 5_000)
 
     shard_args = [
       consumer_name: opts[:name],
@@ -66,7 +72,9 @@ defmodule KinesisClient.Stream do
       app_state_opts: Keyword.get(opts, :app_state_opts, []),
       shard_supervisor_name: shard_supervisor_name,
       worker_ref: worker_ref,
-      shard_args: shard_args
+      shard_args: shard_args,
+      retry_timeout: retry_timeout,
+      retry_jitter: retry_jitter
     ]
 
     children = [
