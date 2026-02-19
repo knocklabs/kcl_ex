@@ -25,6 +25,9 @@ defmodule KinesisClient.Stream do
       taken by another process. Defaults to 90 seconds.
     * `:can_acquire_lease?` - A function that determines if a lease can be acquired. The function
       should take a single argument, the shard_id, and return a boolean. Defaults to `fn _ -> true end`.
+    * `:worker_ref` - A function that returns the unique reference (as a string) for the worker attempting
+      to acquire the lease. The function doesn't take any arguments, and must return a string. Defaults to
+      a random string of the format "worker-<random_number>".
   """
   def start_link(opts) do
     Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -33,7 +36,7 @@ defmodule KinesisClient.Stream do
   def init(opts) do
     stream_name = get_stream_name(opts)
     app_name = get_app_name(opts)
-    worker_ref = "worker-#{:rand.uniform(10_000)}"
+    worker_ref = get_worker_ref(opts)
     {shard_supervisor_spec, shard_supervisor_name} = get_shard_supervisor(opts)
     coordinator_name = get_coordinator_name(opts)
     shard_consumer = get_shard_consumer(opts)
@@ -132,6 +135,26 @@ defmodule KinesisClient.Stream do
 
       _ ->
         raise ArgumentError, message: ":shard_processor option must be a module name"
+    end
+  end
+
+  defp get_worker_ref(opts) do
+    opts
+    |> Keyword.get(:worker_ref, fn -> "worker-#{:rand.uniform(10_000)}" end)
+    |> case do
+      fun when is_function(fun, 0) ->
+        case fun.() do
+          ref when is_binary(ref) ->
+            ref
+
+          other ->
+            raise ArgumentError,
+                  ":worker_ref function must return a string, got: #{inspect(other)}"
+        end
+
+      _ ->
+        raise ArgumentError,
+              ":worker_ref option must be a function that takes no arguments and returns a string"
     end
   end
 end
