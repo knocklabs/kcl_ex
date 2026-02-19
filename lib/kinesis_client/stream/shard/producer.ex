@@ -300,6 +300,15 @@ defmodule KinesisClient.Stream.Shard.Producer do
 
       {:ok, %{"ShardIterator" => iterator}} ->
         get_records(%{state | shard_iterator: iterator})
+
+      {:error, reason} ->
+        Logger.error(
+          "[kcl_ex] Error getting shard iterator for #{state.stream_name} " <>
+            "shard #{state.shard_id}: #{inspect(reason)}"
+        )
+
+        poll_timer = schedule_shard_poll(state.poll_interval)
+        {:noreply, [], %{state | poll_timer: poll_timer}}
     end
   end
 
