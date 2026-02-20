@@ -44,7 +44,7 @@ defmodule KinesisClient.Stream do
     {shard_supervisor_spec, shard_supervisor_name} = get_shard_supervisor(opts)
     coordinator_name = get_coordinator_name(opts)
     shard_consumer = get_shard_consumer(opts)
-    retry_timeout = Keyword.get(opts, :retry_timeout, 30_000)
+    retry_timeout = Keyword.get(opts, :rate_limited_retry_timeout, 30_000)
     retry_jitter = Keyword.get(opts, :rate_limited_retry_jitter, 5_000)
 
     shard_args = [
