@@ -173,7 +173,7 @@ defmodule KinesisClient.Stream.Coordinator do
         {:noreply, %{state | shard_graph: shard_graph, shard_pid_map: map}}
 
       {:error, {"LimitExceededException", _}} ->
-        sleep_period_ms = state.retry_timeout + :rand.uniform(state.jitter)
+        sleep_period_ms = state.retry_timeout + :rand.uniform(state.retry_jitter)
 
         Logger.error(
           "[kcl_ex] error describing stream #{state.stream_name} shards due to limit exceeded: Retrying in #{sleep_period_ms} ms"
@@ -191,7 +191,7 @@ defmodule KinesisClient.Stream.Coordinator do
         )
 
         if state.startup_attempt < @max_startup_attempts do
-          sleep_period_ms = state.retry_timeout + :rand.uniform(state.jitter)
+          sleep_period_ms = state.retry_timeout + :rand.uniform(state.retry_jitter)
           :timer.sleep(sleep_period_ms)
 
           state = %{state | startup_attempt: state.startup_attempt + 1}
