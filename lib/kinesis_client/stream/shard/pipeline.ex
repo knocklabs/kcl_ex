@@ -100,7 +100,7 @@ defmodule KinesisClient.Stream.Shard.Pipeline do
     end
   end
 
-  def stop(app_name, shard_id) do
+  def stop(app_name, shard_id, shard_producer_shutdown_timeout) do
     names = Broadway.producer_names(name(app_name, shard_id))
 
     errors =
@@ -111,7 +111,7 @@ defmodule KinesisClient.Stream.Shard.Pipeline do
         |> is_nil()
       end)
       |> Enum.reduce([], fn name, errs ->
-        case Producer.stop(name) do
+        case Producer.stop(name, shard_producer_shutdown_timeout) do
           :ok ->
             errs
 

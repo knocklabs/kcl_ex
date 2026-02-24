@@ -49,8 +49,8 @@ defmodule KinesisClient.Stream.Shard.Producer do
     GenServer.call(name, :start)
   end
 
-  def stop(name) do
-    GenServer.call(name, :stop)
+  def stop(name, timeout) when is_integer(timeout) and timeout > 0 do
+    GenServer.call(name, :stop, timeout)
   end
 
   @impl GenStage

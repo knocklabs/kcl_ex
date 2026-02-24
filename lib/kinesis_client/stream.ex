@@ -32,6 +32,8 @@ defmodule KinesisClient.Stream do
       retrying to acquire a lease after receiving a rate limit exception from AWS. Defaults to 30 seconds.
     * `:rate_limited_retry_jitter` - The amount of time in milliseconds to add as jitter to the
       `:rate_limited_retry_timeout`.
+    * `:shard_producer_shutdown_timeout` - The amount of time in milliseconds to wait for each shard producer
+      to shutdown gracefully before killing it (whenever the pipeline needs to be stopped). Defaults to 5 seconds.
   """
   def start_link(opts) do
     Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -46,6 +48,7 @@ defmodule KinesisClient.Stream do
     shard_consumer = get_shard_consumer(opts)
     retry_timeout = Keyword.get(opts, :rate_limited_retry_timeout, 30_000)
     retry_jitter = Keyword.get(opts, :rate_limited_retry_jitter, 5_000)
+    shard_producer_shutdown_timeout = Keyword.get(opts, :shard_producer_shutdown_timeout, 5_000)
 
     shard_args = [
       consumer_name: opts[:name],
@@ -55,7 +58,8 @@ defmodule KinesisClient.Stream do
       lease_owner: worker_ref,
       shard_consumer: shard_consumer,
       processors: opts[:processors],
-      batchers: opts[:batchers]
+      batchers: opts[:batchers],
+      shard_producer_shutdown_timeout: shard_producer_shutdown_timeout
     ]
 
     shard_args =
