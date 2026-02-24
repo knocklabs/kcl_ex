@@ -73,6 +73,6 @@ defmodule KinesisClient.Stream.Shard.PipelineTest do
 
     assert Process.alive?(pid)
 
-    assert :ok == Pipeline.stop(app_name, shard_id)
+    assert :ok == Pipeline.stop(app_name, shard_id, _shard_producer_shutdown_timeout = 5000)
   end
 end

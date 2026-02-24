@@ -19,7 +19,8 @@ defmodule KinesisClient.Stream.Shard do
     lease_opts = [
       app_name: opts[:app_name],
       shard_id: opts[:shard_id],
-      lease_owner: opts[:lease_owner]
+      lease_owner: opts[:lease_owner],
+      shard_producer_shutdown_timeout: opts[:shard_producer_shutdown_timeout]
     ]
 
     pipeline_opts = [

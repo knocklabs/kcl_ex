@@ -36,7 +36,8 @@ defmodule KinesisClient.Stream.Shard.Lease do
     :notify,
     :lease_expiry,
     :lease_holder,
-    :can_acquire_lease?
+    :can_acquire_lease?,
+    :shard_producer_shutdown_timeout
   ]
 
   @type t :: %__MODULE__{}
@@ -52,7 +53,8 @@ defmodule KinesisClient.Stream.Shard.Lease do
       lease_expiry: Keyword.get(opts, :lease_expiry, @default_lease_expiry),
       lease_count_increment_time: current_time(),
       notify: Keyword.get(opts, :notify),
-      can_acquire_lease?: Keyword.get(opts, :can_acquire_lease?, &default_can_acquire_lease?/1)
+      can_acquire_lease?: Keyword.get(opts, :can_acquire_lease?, &default_can_acquire_lease?/1),
+      shard_producer_shutdown_timeout: Keyword.get(opts, :shard_producer_shutdown_timeout, 5_000)
     }
 
     Process.send_after(self(), :take_or_renew_lease, state.renew_interval)
@@ -197,7 +199,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
               "shard_id: #{state.shard_id}, lease_owner: #{state.lease_owner}]"
           )
 
-          :ok = Pipeline.stop(app_name, state.shard_id)
+          :ok = Pipeline.stop(app_name, state.shard_id, state.shard_producer_shutdown_timeout)
           %{state | lease_holder: false, lease_count_increment_time: current_time()}
 
         {:error, e} ->
@@ -208,7 +210,7 @@ defmodule KinesisClient.Stream.Shard.Lease do
           state
       end
     else
-      :ok = Pipeline.stop(app_name, state.shard_id)
+      :ok = Pipeline.stop(app_name, state.shard_id, state.shard_producer_shutdown_timeout)
       %{state | lease_holder: false, lease_count_increment_time: current_time()}
     end
   end
@@ -235,11 +237,11 @@ defmodule KinesisClient.Stream.Shard.Lease do
           state
 
         {:error, :lease_take_failed} ->
-          :ok = Pipeline.stop(app_name, state.shard_id)
+          :ok = Pipeline.stop(app_name, state.shard_id, state.shard_producer_shutdown_timeout)
           %{state | lease_holder: false, lease_count_increment_time: current_time()}
       end
     else
-      :ok = Pipeline.stop(app_name, state.shard_id)
+      :ok = Pipeline.stop(app_name, state.shard_id, state.shard_producer_shutdown_timeout)
       %{state | lease_holder: false, lease_count_increment_time: current_time()}
     end
   end
