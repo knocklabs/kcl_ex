@@ -59,6 +59,7 @@ defmodule KinesisClient.Stream do
       shard_consumer: shard_consumer,
       processors: opts[:processors],
       batchers: opts[:batchers],
+      producer_poll_interval: opts[:producer_poll_interval],
       shard_producer_shutdown_timeout: shard_producer_shutdown_timeout
     ]
 

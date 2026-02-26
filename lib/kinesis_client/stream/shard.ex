@@ -32,6 +32,7 @@ defmodule KinesisClient.Stream.Shard do
       shard_consumer: opts[:shard_consumer],
       processors: opts[:processors],
       batchers: opts[:batchers],
+      producer_poll_interval: opts[:producer_poll_interval],
       coordinator_name: opts[:coordinator_name]
     ]
 
